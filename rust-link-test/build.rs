@@ -84,8 +84,17 @@ fn main() {
                 }
             }
             names.sort_by_key(|n| archive_rank(n));
-            for n in &names {
-                println!("cargo:rustc-link-lib=static={n}");
+            // GNU ld's single pass cannot satisfy CYCLIC references between the
+            // Swift archives (e.g. FoundationEssentials <->
+            // FoundationInternationalization: Date.nextUp/nextDown are defined
+            // in one and referenced from FormatStyle code in the other, in
+            // both directions, so no static ordering works). Re-listing the
+            // whole set a few times makes ld rescan until a fixed point, the
+            // classic pre---start-group trick.
+            for _ in 0..3 {
+                for n in &names {
+                    println!("cargo:rustc-link-lib=static={n}");
+                }
             }
 
             // swiftrt.o registers the Swift runtime resource sections
@@ -155,7 +164,19 @@ fn main() {
             // (location found by the workflow via `find`, passed as
             // SWIFTFMT_COMPAT_DIR).
             if let Ok(dir) = env::var("SWIFTFMT_COMPAT_DIR") {
-                let d = PathBuf::from(&dir);
+                let mut d = PathBuf::from(&dir);
+                // Xcode ships per-platform copies of the compatibility
+                // archives under usr/lib/swift/<platform>; a `find` may land
+                // on e.g. xros, whose objects ld rejects ("building for
+                // macOS, but linking in object built for visionOS") or whose
+                // fat files lack our arch. Prefer the macosx directory.
+                if d.file_name().map(|n| n != "macosx").unwrap_or(true) {
+                    let macosx = d
+                        .parent()
+                        .map(|p| p.join("macosx"))
+                        .filter(|c| c.is_dir());
+                    d = macosx.unwrap_or(d);
+                }
                 if d.is_dir() {
                     println!("cargo:rustc-link-search=native={}", d.display());
                     if let Ok(entries) = fs::read_dir(&d) {
