@@ -31,8 +31,9 @@ for i in 1 2 3; do
 done
 
 if [ "$rc" = 0 ]; then
-  BIN=$(find .build-wasm/release -maxdepth 1 \( -name swiftformat_wasm -o -name swiftformat_wasm.wasm \) -type f | head -1)
-  if [ -z "$BIN" ]; then echo "BUILD_OK BUT NO BINARY FOUND"; ls -la .build-wasm/release/ | head -30; exit 1; fi
+  find .build-wasm -name '*.wasm' | head -10
+  BIN=$(find .build-wasm -name 'swiftformat_wasm.wasm' \( -type f -o -type l \) | head -1)
+  if [ -z "$BIN" ]; then echo "BUILD_OK BUT NO BINARY FOUND"; exit 1; fi
   cp "$BIN" ../swiftformat.wasm
   ls -la ../swiftformat.wasm
   echo "BUILD_OK"
