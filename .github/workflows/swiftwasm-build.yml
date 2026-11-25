@@ -39,6 +39,14 @@ jobs:
       - name: Clone swift-format 603.0.0 (sibling of wasm/)
         run: git clone --depth 1 --branch 603.0.0 https://github.com/swiftlang/swift-format swift-format
 
+      - uses: actions/cache@v4
+        with:
+          path: |
+            wasm/.build-wasm
+            ~/.cache/org.swift.swiftpm
+          key: swiftwasm-build-${{ github.sha }}
+          restore-keys: swiftwasm-build-
+
       - name: Build wasm module
         run: bash wasm/build-ci.sh
 
