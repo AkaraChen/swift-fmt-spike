@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  SWIFT_VERSION: "6.1.2"
+  SWIFT_VERSION: "6.4.3"
 
 jobs:
   linux:
@@ -17,13 +17,16 @@ jobs:
         include:
           - os: ubuntu-24.04
             arch: x86_64
+            swiftplatform: ubuntu2404
             swiftarch: ""
           - os: ubuntu-24.04-arm
             arch: aarch64
+            swiftplatform: ubuntu2404-aarch64
             swiftarch: "-aarch64"
     runs-on: ${{ matrix.os }}
     env:
       SWIFT_ROOT: ${{ github.workspace }}/swift
+      SWIFTPLATFORM: ${{ matrix.swiftplatform }}
       SWIFTARCH: ${{ matrix.swiftarch }}
     steps:
       - uses: actions/checkout@v4
@@ -41,7 +44,7 @@ jobs:
           set -euo pipefail
           VER="${SWIFT_VERSION}"
           RELTAG="swift-${VER}-RELEASE"
-          URL="https://download.swift.org/swift-${VER}-release/ubuntu2404/${RELTAG}/${RELTAG}-ubuntu24.04${SWIFTARCH}.tar.gz"
+          URL="https://download.swift.org/swift-${VER}-release/${SWIFTPLATFORM}/${RELTAG}/${RELTAG}-ubuntu24.04${SWIFTARCH}.tar.gz"
           echo "URL: $URL"
           for i in 1 2 3 4 5; do
             curl -fL --retry 5 --retry-delay 5 -o swift.tar.gz "$URL" && break

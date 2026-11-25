@@ -8,6 +8,11 @@ import PackageDescription
 // exactly what the Rust link-test in ./rust-link-test experiments with.
 let package = Package(
     name: "SwiftFmtShim",
+    platforms: [
+        // swift-format 604.0.0 requires macOS 13.0; without an explicit
+        // platform declaration the package defaults to 10.13 and SPM refuses.
+        .macOS("13.0")
+    ],
     products: [
         .library(name: "SwiftFmtShim", type: .static, targets: ["SwiftFmtShim"])
     ],
