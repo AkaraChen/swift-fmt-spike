@@ -1,0 +1,218 @@
+name: spike
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  SWIFT_VERSION: "6.1.2"
+
+jobs:
+  linux:
+    name: linux (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            arch: x86_64
+            swiftarch: ""
+          - os: ubuntu-24.04-arm
+            arch: aarch64
+            swiftarch: "-aarch64"
+    runs-on: ${{ matrix.os }}
+    env:
+      SWIFT_ROOT: ${{ github.workspace }}/swift
+      SWIFTARCH: ${{ matrix.swiftarch }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Swift build dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            binutils git gnupg2 libc6-dev libcurl4-openssl-dev libedit2 \
+            libgcc-13-dev libncurses-dev libpython3-dev libsqlite3-0 \
+            libstdc++-13-dev libxml2-dev libz3-dev pkg-config tzdata zlib1g-dev
+
+      - name: Install Swift (swift.org tarball)
+        run: |
+          set -euo pipefail
+          VER="${SWIFT_VERSION}"
+          RELTAG="swift-${VER}-RELEASE"
+          URL="https://download.swift.org/swift-${VER}-release/ubuntu2404/${RELTAG}/${RELTAG}-ubuntu24.04${SWIFTARCH}.tar.gz"
+          echo "URL: $URL"
+          for i in 1 2 3 4 5; do
+            curl -fL --retry 5 --retry-delay 5 -o swift.tar.gz "$URL" && break
+            echo "download attempt $i failed"
+            rm -f swift.tar.gz
+            sleep 15
+          done
+          test -f swift.tar.gz
+          mkdir -p "$SWIFT_ROOT"
+          tar -xzf swift.tar.gz -C "$SWIFT_ROOT" --strip-components=1
+          echo "$SWIFT_ROOT/usr/bin" >> "$GITHUB_PATH"
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Build static library (release)
+        run: |
+          swift build -c release
+          BIN="$(swift build --show-bin-path -c release)"
+          echo "SWIFTFMT_A=$BIN/libSwiftFmtShim.a" >> "$GITHUB_ENV"
+          ls -la "$BIN"/libSwiftFmtShim.a
+
+      - name: Try --static-swift-stdlib variant (documents that it is link-time-only for a lib package)
+        run: |
+          swift build -c release --static-swift-stdlib \
+            && echo "static-swift-stdlib build: OK" \
+            || echo "static-swift-stdlib build: FAILED"
+          # For a library-only package this changes nothing about the produced
+          # objects; the Swift runtime linkage decision belongs to the
+          # CONSUMER, which is exactly what rust-link-test experiments with.
+
+      - name: Enumerate static Swift runtime archives (evidence for README)
+        run: |
+          echo "== $SWIFT_ROOT/usr/lib/swift_static/linux =="
+          ls -la "$SWIFT_ROOT/usr/lib/swift_static/linux" || echo "MISSING swift_static dir"
+          echo "== C++ runtime deps of the dynamic libswiftCore.so =="
+          ldd "$SWIFT_ROOT/usr/lib/swift/linux/libswiftCore.so" | grep -Ei 'c\+\+|stdc|icu' || true
+          echo "== total size of the static archives =="
+          du -ch "$SWIFT_ROOT"/usr/lib/swift_static/linux/*.a 2>/dev/null | tail -1 || true
+
+      - name: Choose C++ runtime for the consumer link
+        run: |
+          if ldd "$SWIFT_ROOT/usr/lib/swift/linux/libswiftCore.so" | grep -q 'libc++'; then
+            echo "swiftCore was built against the toolchain's libc++"
+            echo "SWIFTFMT_EXTRA_LIBS=c++" >> "$GITHUB_ENV"
+          else
+            echo "swiftCore was built against the system libstdc++"
+            echo "SWIFTFMT_EXTRA_LIBS=stdc++" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install Rust
+        run: |
+          if ! command -v cargo >/dev/null 2>&1; then
+            curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+          cargo --version
+
+      - name: Build Rust link test (verbose; captures the exact link line)
+        working-directory: rust-link-test
+        env:
+          SWIFTFMT_MODE: linux-static
+          SWIFTFMT_STATIC_A: ${{ env.SWIFTFMT_A }}
+          SWIFTFMT_SWIFT_USRLIB: ${{ env.SWIFT_ROOT }}/usr/lib
+        run: |
+          cargo build -v 2>&1 | tee build.log
+          grep -o 'cc .*link-test.*' build.log | tail -1 > link-line.txt || true
+          wc -l link-line.txt
+
+      - name: Run Rust link test
+        working-directory: rust-link-test
+        env:
+          SWIFTFMT_MODE: linux-static
+          SWIFTFMT_STATIC_A: ${{ env.SWIFTFMT_A }}
+          SWIFTFMT_SWIFT_USRLIB: ${{ env.SWIFT_ROOT }}/usr/lib
+        run: cargo run
+
+      - name: Sizes
+        run: |
+          echo "== libSwiftFmtShim.a =="
+          ls -l "$SWIFTFMT_A"
+          echo "== rust test binary =="
+          ls -l rust-link-test/target/release/link-test
+          echo "== baseline: empty rust binary without Swift =="
+          printf 'fn main() {}\n' > /tmp/empty.rs
+          rustc -O -o /tmp/empty-bin /tmp/empty.rs
+          ls -l /tmp/empty-bin
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-fmt-shim-linux-${{ matrix.arch }}
+          path: |
+            ${{ env.SWIFTFMT_A }}
+            SwiftFmtShim.h
+            rust-link-test/link-line.txt
+
+  macos:
+    name: macos (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            name: macos-14-arm64
+            optional: false
+          - os: macos-15
+            name: macos-15-arm64
+            optional: true
+          - os: macos-13
+            name: macos-13-x64
+            optional: true
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.optional }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain info
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Build static library (release)
+        run: |
+          swift build -c release
+          BIN="$(swift build --show-bin-path -c release)"
+          echo "SWIFTFMT_A=$BIN/libSwiftFmtShim.a" >> "$GITHUB_ENV"
+          ls -la "$BIN"/libSwiftFmtShim.a
+
+      - name: Enumerate system Swift runtime (evidence for README)
+        run: |
+          echo "== /usr/lib/swift (Swift runtime libs shipped with macOS) =="
+          ls /usr/lib/swift | grep -E 'swiftCore|SwiftOnoneSupport|StringProcessing|Concurrency|dispatch' || true
+
+      - name: Install Rust
+        run: |
+          if ! command -v cargo >/dev/null 2>&1; then
+            curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+          cargo --version
+
+      - name: Build Rust link test (verbose)
+        working-directory: rust-link-test
+        env:
+          SWIFTFMT_MODE: macos-system
+          SWIFTFMT_STATIC_A: ${{ env.SWIFTFMT_A }}
+        run: cargo build -v 2>&1 | tee build.log
+
+      - name: Run Rust link test
+        working-directory: rust-link-test
+        env:
+          SWIFTFMT_MODE: macos-system
+          SWIFTFMT_STATIC_A: ${{ env.SWIFTFMT_A }}
+        run: cargo run
+
+      - name: Sizes
+        run: |
+          echo "== libSwiftFmtShim.a =="
+          ls -l "$SWIFTFMT_A"
+          echo "== rust test binary =="
+          ls -l rust-link-test/target/release/link-test
+          echo "== baseline: empty rust binary without Swift =="
+          printf 'fn main() {}\n' > /tmp/empty.rs
+          rustc -O -o /tmp/empty-bin /tmp/empty.rs
+          ls -l /tmp/empty-bin
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-fmt-shim-${{ matrix.name }}
+          path: |
+            ${{ env.SWIFTFMT_A }}
+            SwiftFmtShim.h

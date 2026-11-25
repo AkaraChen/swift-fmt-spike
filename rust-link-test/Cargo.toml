@@ -1,0 +1,9 @@
+[package]
+name = "swift-fmt-link-test"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "link-test"
+path = "src/main.rs"
