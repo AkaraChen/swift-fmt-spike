@@ -37,7 +37,7 @@ jobs:
           swift sdk list
 
       - name: Clone swift-format 603.0.0 (sibling of wasm/)
-        run: git clone --depth 1 --branch 603.0.0 https://github.com/swiftlang/swift-format ../swift-format
+        run: git clone --depth 1 --branch 603.0.0 https://github.com/swiftlang/swift-format swift-format
 
       - name: Build wasm module
         run: bash wasm/build-ci.sh
