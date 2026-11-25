@@ -63,7 +63,7 @@ public func swiftformat_format(
     configuration = Configuration()
   }
 
-  let source = String(decoding: srcPtr.bindMemory(to: UInt8.self, capacity: Int(srcLen)), as: UTF8.self)
+  let source = String(decoding: UnsafeBufferPointer(start: srcPtr.bindMemory(to: UInt8.self, capacity: Int(srcLen)), count: Int(srcLen)), as: UTF8.self)
 
   let formatter = SwiftFormatter(configuration: configuration)
   var stream = ByteStream()
