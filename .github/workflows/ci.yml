@@ -145,14 +145,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # macos-14 (arm64) was the original target but GitHub retired that
+          # runner image in 2026 (jobs fail instantly with "configuration not
+          # supported"); kept as an optional job to document the retirement.
           - os: macos-14
-            name: macos-14-arm64
-            optional: false
+            name: macos-14-arm64-retired
+            optional: true
+          # macos-15 is the available arm64 macOS platform.
           - os: macos-15
             name: macos-15-arm64
+            optional: false
+          - os: macos-26
+            name: macos-26-arm64
             optional: true
-          - os: macos-13
-            name: macos-13-x64
+          # x64 macOS: macos-13 queues forever (retired), so the last Intel
+          # image is the only x64 attempt.
+          - os: macos-15-intel
+            name: macos-15-intel-x64
             optional: true
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.optional }}
