@@ -12,7 +12,9 @@ let package = Package(
         .library(name: "SwiftFmtShim", type: .static, targets: ["SwiftFmtShim"])
     ],
     dependencies: [
-        .package(url: "https://github.com/swiftlang/swift-format.git", exactVersion: Version(604, 0, 0)),
+        // Exact pin via a single-version closed range (the `exactVersion:`
+        // overload does not exist in the tools-6.0 ManifestAPI).
+        .package(url: "https://github.com/swiftlang/swift-format.git", Version(604, 0, 0)...Version(604, 0, 0)),
     ],
     targets: [
         .target(
