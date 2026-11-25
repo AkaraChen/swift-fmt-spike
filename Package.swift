@@ -12,7 +12,7 @@ let package = Package(
         .library(name: "SwiftFmtShim", type: .static, targets: ["SwiftFmtShim"])
     ],
     dependencies: [
-        .package(url: "https://github.com/swiftlang/swift-format.git", exactVersion: "604.0.0"),
+        .package(url: "https://github.com/swiftlang/swift-format.git", exactVersion: Version(604, 0, 0)),
     ],
     targets: [
         .target(
