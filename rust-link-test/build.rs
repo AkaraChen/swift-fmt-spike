@@ -155,7 +155,7 @@ fn main() {
             // (location found by the workflow via `find`, passed as
             // SWIFTFMT_COMPAT_DIR).
             if let Ok(dir) = env::var("SWIFTFMT_COMPAT_DIR") {
-                let d = PathBuf::from(dir);
+                let d = PathBuf::from(&dir);
                 if d.is_dir() {
                     println!("cargo:rustc-link-search=native={}", d.display());
                     if let Ok(entries) = fs::read_dir(&d) {
