@@ -84,6 +84,16 @@ jobs:
           ldd "$SWIFT_ROOT/usr/lib/swift/linux/libswiftCore.so" | grep -Ei 'c\+\+|stdc|icu' || true
           echo "== total size of the static archives =="
           du -ch "$SWIFT_ROOT"/usr/lib/swift_static/linux/*.a 2>/dev/null | tail -1 || true
+          echo "== swiftrt.o (Swift runtime resource registration object) =="
+          SWIFTRT="$(find "$SWIFT_ROOT/usr/lib" -name 'swiftrt.o' 2>/dev/null | head -1)"
+          echo "swiftrt.o: $SWIFTRT"
+          if [ -n "$SWIFTRT" ]; then
+            ls -l "$SWIFTRT"
+            echo "SWIFTFMT_SWIFTRT_O=$SWIFTRT" >> "$GITHUB_ENV"
+          fi
+          echo "== canonical static-stdlib link args from the driver =="
+          LNK="$SWIFT_ROOT/usr/lib/swift/linux/static-stdlib-args.lnk"
+          if [ -f "$LNK" ]; then cat "$LNK"; else echo "no static-stdlib-args.lnk at $LNK"; fi
 
       - name: Choose C++ runtime for the consumer link
         run: |
@@ -102,6 +112,7 @@ jobs:
             echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           fi
           cargo --version
+          sudo apt-get install -y gdb
 
       - name: Build Rust link test (verbose; captures the exact link line)
         working-directory: rust-link-test
@@ -112,16 +123,37 @@ jobs:
         run: |
           set -o pipefail
           cargo build -v 2>&1 | tee build.log
-          grep -o 'cc .*link-test.*' build.log | tail -1 > link-line.txt || true
+          grep 'crate-name link_test' build.log | tail -1 > link-line.txt || true
           wc -l link-line.txt
 
-      - name: Run Rust link test
+      - name: Run Rust link test (static Swift runtime)
         working-directory: rust-link-test
         env:
           SWIFTFMT_MODE: linux-static
           SWIFTFMT_STATIC_A: ${{ env.SWIFTFMT_A }}
           SWIFTFMT_SWIFT_USRLIB: ${{ env.SWIFT_ROOT }}/usr/lib
         run: cargo run
+
+      - name: Crash diagnosis (gdb backtrace)
+        if: ${{ !cancelled() }}
+        working-directory: rust-link-test
+        env:
+          SWIFTFMT_MODE: linux-static
+          SWIFTFMT_STATIC_A: ${{ env.SWIFTFMT_A }}
+          SWIFTFMT_SWIFT_USRLIB: ${{ env.SWIFT_ROOT }}/usr/lib
+        run: |
+          gdb -q -batch -ex run -ex 'bt 30' -ex 'info threads' target/debug/link-test 2>&1 | tail -60 || true
+
+      - name: Reference run with DYNAMIC Swift runtime (isolates static-runtime init bugs)
+        if: ${{ !cancelled() }}
+        working-directory: rust-link-test
+        env:
+          SWIFTFMT_MODE: linux-dynamic
+          SWIFTFMT_STATIC_A: ${{ env.SWIFTFMT_A }}
+          SWIFTFMT_SWIFT_USRLIB: ${{ env.SWIFT_ROOT }}/usr/lib
+        run: |
+          cargo build -v 2>&1 | tail -5
+          gdb -q -batch -ex run -ex 'bt 20' target/debug/link-test 2>&1 | tail -40 || true
 
       - name: Sizes
         run: |
@@ -192,15 +224,13 @@ jobs:
       - name: Locate toolchain compat archives (back-deployment libs)
         run: |
           # xcrun -f swift -> <Xcode.app>/Contents/Developer/usr/bin/swift
-          TC_USR="$(dirname "$(dirname "$(xcrun -f swift)")")"
-          echo "toolchain usr: $TC_USR"
-          if [ -d "$TC_USR/lib/swift_static/macosx" ]; then
-            echo "SWIFTFMT_SWIFT_USRLIB=$TC_USR/lib" >> "$GITHUB_ENV"
-            ls "$TC_USR/lib/swift_static/macosx" | grep -E 'swiftCompatibility' || true
-          else
-            echo "no swift_static/macosx in toolchain; trying SDK"
-            SDK="$(xcrun --show-sdk-path)"
-            echo "SWIFTFMT_SWIFT_USRLIB=$SDK/usr/lib" >> "$GITHUB_ENV"
+          TC="$(dirname "$(dirname "$(xcrun -f swift)")")"
+          echo "toolchain usr: $TC"
+          COMPAT="$(dirname "$(find "$TC" "$(xcrun --show-sdk-path)" -name 'libswiftCompatibility56.a' 2>/dev/null | head -1)")"
+          echo "compat dir: ${COMPAT:-NOT FOUND}"
+          if [ -n "$COMPAT" ]; then
+            ls -l "$COMPAT"
+            echo "SWIFTFMT_COMPAT_DIR=$COMPAT" >> "$GITHUB_ENV"
           fi
 
       - name: Install Rust
@@ -216,7 +246,7 @@ jobs:
         env:
           SWIFTFMT_MODE: macos-system
           SWIFTFMT_STATIC_A: ${{ env.SWIFTFMT_A }}
-          SWIFTFMT_SWIFT_USRLIB: ${{ env.SWIFTFMT_SWIFT_USRLIB }}
+          SWIFTFMT_COMPAT_DIR: ${{ env.SWIFTFMT_COMPAT_DIR }}
           MACOSX_DEPLOYMENT_TARGET: "13.0"
         run: |
           set -o pipefail
@@ -227,7 +257,7 @@ jobs:
         env:
           SWIFTFMT_MODE: macos-system
           SWIFTFMT_STATIC_A: ${{ env.SWIFTFMT_A }}
-          SWIFTFMT_SWIFT_USRLIB: ${{ env.SWIFTFMT_SWIFT_USRLIB }}
+          SWIFTFMT_COMPAT_DIR: ${{ env.SWIFTFMT_COMPAT_DIR }}
           MACOSX_DEPLOYMENT_TARGET: "13.0"
         run: cargo run
 

@@ -50,6 +50,17 @@ fn main() {
         println!("version: {}", CStr::from_ptr(v).to_string_lossy());
     }
 
+    // 0a. Empty-input probe: format() short-circuits before parsing, so this
+    // exercises the Swift runtime + FFI boundary without the parser.
+    match call_format(b"") {
+        Some(s) => println!("empty-input probe: OK ({} bytes)", s.len()),
+        None => println!("empty-input probe: NULL"),
+    }
+
+    // 0b. Tiny-input probe: full parse + pretty-print of one line.
+    let tiny = call_format(b"let x = 1\n").expect("tiny-input probe returned NULL");
+    println!("tiny-input probe: OK ({:?})", tiny);
+
     // 1. Basic formatting through the C ABI.
     let out = call_format(SAMPLE.as_bytes())
         .expect("swiftfmt_format returned NULL for valid input");

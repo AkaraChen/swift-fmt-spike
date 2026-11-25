@@ -13,6 +13,25 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Link-order rank for the Swift static runtime archives (GNU ld single pass:
+/// dependents must precede their dependencies).
+fn archive_rank(n: &str) -> u8 {
+    match n {
+        "swiftCore" => 0,
+        "swiftSwiftOnoneSupport" => 1,
+        "Foundation" | "FoundationXML" | "FoundationNetworking" => 2,
+        "FoundationEssentials" => 3,
+        "FoundationInternationalization" => 4,
+        "_FoundationCollections" => 5,
+        "CoreFoundation" | "_FoundationCShims" | "_CFXMLInterface" | "_CFURLSessionInterface"
+        | "DispatchStubs" => 6,
+        "_FoundationICU" => 7,
+        n if n.starts_with("swift") => 8,
+        "dispatch" | "BlocksRuntime" => 9,
+        _ => 10,
+    }
+}
+
 fn main() {
     for k in [
         "SWIFTFMT_MODE",
@@ -49,8 +68,11 @@ fn main() {
             println!("cargo:rustc-link-search=native={}", static_dir.display());
 
             // Link every static archive the toolchain ships. Archive members
-            // are only pulled in when actually referenced, so this is both
-            // robust across toolchain versions and dependency-order-proof.
+            // are only pulled in when actually referenced, but ORDER MATTERS:
+            // with GNU ld's single pass, an archive must come after every
+            // archive that references its members. The order below mirrors
+            // the Foundation layering (overlay -> Essentials ->
+            // Internationalization -> ICU -> CF shims).
             let mut names: Vec<String> = Vec::new();
             for e in fs::read_dir(&static_dir)
                 .unwrap_or_else(|e| panic!("cannot list {}: {e}", static_dir.display()))
@@ -61,14 +83,24 @@ fn main() {
                     names.push(stem.to_string());
                 }
             }
-            // Rough dependency order: swiftCore first, then the rest.
-            names.sort_by_key(|n| match n.as_str() {
-                "swiftCore" => 0,
-                "swiftSwiftOnoneSupport" => 1,
-                _ => 2,
-            });
+            names.sort_by_key(|n| archive_rank(n));
             for n in &names {
                 println!("cargo:rustc-link-lib=static={n}");
+            }
+
+            // swiftrt.o registers the Swift runtime resource sections
+            // (protocol conformances, reflection) via its constructors; Swift's
+            // own driver always links it for executables. Without it, pure-Swift
+            // code linked into a foreign (Rust) main segfaults on first
+            // metadata access. It is a bare .o, so its position on the link
+            // line only affects resolution order, and end placement resolves
+            // fine against the archives above.
+            if let Ok(rt) = env::var("SWIFTFMT_SWIFTRT_O") {
+                if Path::new(&rt).exists() {
+                    println!("cargo:rustc-link-arg={rt}");
+                } else {
+                    println!("cargo:warning=SWIFTFMT: swiftrt.o not found at {rt}");
+                }
             }
 
             // swiftCore is C++: provide the C++ runtime. libstdc++ is the
@@ -119,13 +151,14 @@ fn main() {
             }
             // Swift code built for an older deployment target than the compiler
             // emits __swift_FORCE_LOAD_$_swiftCompatibilityNN symbols; those are
-            // defined in the toolchain's static compatibility archives
-            // (usr/lib/swift_static/macosx/libswiftCompatibility*.a).
-            if let Ok(u) = &usrlib {
-                let compat_dir = Path::new(u).join("swift_static/macosx");
-                if compat_dir.is_dir() {
-                    println!("cargo:rustc-link-search=native={}", compat_dir.display());
-                    if let Ok(entries) = fs::read_dir(&compat_dir) {
+            // defined in static compatibility archives shipped with the toolchain
+            // (location found by the workflow via `find`, passed as
+            // SWIFTFMT_COMPAT_DIR).
+            if let Ok(dir) = env::var("SWIFTFMT_COMPAT_DIR") {
+                let d = PathBuf::from(dir);
+                if d.is_dir() {
+                    println!("cargo:rustc-link-search=native={}", d.display());
+                    if let Ok(entries) = fs::read_dir(&d) {
                         for e in entries.flatten() {
                             let n = e.file_name().to_string_lossy().to_string();
                             if n.starts_with("libswiftCompatibility") && n.ends_with(".a") {
@@ -139,7 +172,7 @@ fn main() {
                         }
                     }
                 } else {
-                    println!("cargo:warning=SWIFTFMT: compat archive dir not found: {}", compat_dir.display());
+                    println!("cargo:warning=SWIFTFMT: SWIFTFMT_COMPAT_DIR is not a directory: {dir}");
                 }
             }
             for f in ["Foundation", "CoreFoundation"] {
