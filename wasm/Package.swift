@@ -13,7 +13,7 @@ let package = Package(
         .product(name: "SwiftFormat", package: "swift-format")
       ],
       swiftSettings: [
-        .swiftLanguageMode(.5)
+        .swiftLanguageMode(.v5)
       ],
       linkerSettings: [
         .unsafeFlags([
