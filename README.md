@@ -1,5 +1,16 @@
 # swift-fmt-spike
 
+> **Outcome:** the native static-library route below is **NO-GO** (reasons
+> documented in the rest of this file). The follow-up **SwiftWasm** route is
+> **GO**: `wasm/` + `.github/workflows/swiftwasm-build.yml` build swift-format
+> 603.0.0 unmodified for `wasm32-unknown-wasip1` (Swift 6.3.0 + official
+> SwiftWasm 6.3 SDK, no Docker), stripped and zstd'd to ~15MB, WASI-only
+> imports (gate: `JS_IMPORTS: NONE`). It is now merged-quality in fama as
+> [AkaraChen/fama#38](https://github.com/AkaraChen/fama/pull/38); the crate at
+> `formatters/swift/` in that PR is the consumer, including the hand-rolled
+> WASI p1 wasmtime host. Full probe data: `~/.cache/swiftwasm-probe/REPORT.md`
+> on the author's machine.
+
 Feasibility spike: **can apple/swift-format be linked into a Rust binary as a
 static library (C ABI) — with the Swift runtime wired up per platform — so that
 [fama](https://github.com/AkaraChen/fama) can format Swift in-process instead
