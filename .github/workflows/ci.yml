@@ -110,6 +110,7 @@ jobs:
           SWIFTFMT_STATIC_A: ${{ env.SWIFTFMT_A }}
           SWIFTFMT_SWIFT_USRLIB: ${{ env.SWIFT_ROOT }}/usr/lib
         run: |
+          set -o pipefail
           cargo build -v 2>&1 | tee build.log
           grep -o 'cc .*link-test.*' build.log | tail -1 > link-line.txt || true
           wc -l link-line.txt
@@ -201,7 +202,9 @@ jobs:
         env:
           SWIFTFMT_MODE: macos-system
           SWIFTFMT_STATIC_A: ${{ env.SWIFTFMT_A }}
-        run: cargo build -v 2>&1 | tee build.log
+        run: |
+          set -o pipefail
+          cargo build -v 2>&1 | tee build.log
 
       - name: Run Rust link test
         working-directory: rust-link-test

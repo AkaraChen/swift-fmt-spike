@@ -101,7 +101,7 @@ fn main() {
     let fails = AtomicUsize::new(0);
     thread::scope(|s| {
         for _ in 0..4 {
-            s(|| {
+            s.spawn(|| {
                 for _ in 0..10 {
                     if call_format(SAMPLE.as_bytes()).is_none() {
                         fails.fetch_add(1, Ordering::SeqCst);
