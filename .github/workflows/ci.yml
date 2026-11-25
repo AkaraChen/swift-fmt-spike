@@ -189,6 +189,20 @@ jobs:
           echo "== /usr/lib/swift (Swift runtime libs shipped with macOS) =="
           ls /usr/lib/swift | grep -E 'swiftCore|SwiftOnoneSupport|StringProcessing|Concurrency|dispatch' || true
 
+      - name: Locate toolchain compat archives (back-deployment libs)
+        run: |
+          # xcrun -f swift -> <Xcode.app>/Contents/Developer/usr/bin/swift
+          TC_USR="$(dirname "$(dirname "$(xcrun -f swift)")")"
+          echo "toolchain usr: $TC_USR"
+          if [ -d "$TC_USR/lib/swift_static/macosx" ]; then
+            echo "SWIFTFMT_SWIFT_USRLIB=$TC_USR/lib" >> "$GITHUB_ENV"
+            ls "$TC_USR/lib/swift_static/macosx" | grep -E 'swiftCompatibility' || true
+          else
+            echo "no swift_static/macosx in toolchain; trying SDK"
+            SDK="$(xcrun --show-sdk-path)"
+            echo "SWIFTFMT_SWIFT_USRLIB=$SDK/usr/lib" >> "$GITHUB_ENV"
+          fi
+
       - name: Install Rust
         run: |
           if ! command -v cargo >/dev/null 2>&1; then
@@ -202,6 +216,8 @@ jobs:
         env:
           SWIFTFMT_MODE: macos-system
           SWIFTFMT_STATIC_A: ${{ env.SWIFTFMT_A }}
+          SWIFTFMT_SWIFT_USRLIB: ${{ env.SWIFTFMT_SWIFT_USRLIB }}
+          MACOSX_DEPLOYMENT_TARGET: "13.0"
         run: |
           set -o pipefail
           cargo build -v 2>&1 | tee build.log
@@ -211,6 +227,8 @@ jobs:
         env:
           SWIFTFMT_MODE: macos-system
           SWIFTFMT_STATIC_A: ${{ env.SWIFTFMT_A }}
+          SWIFTFMT_SWIFT_USRLIB: ${{ env.SWIFTFMT_SWIFT_USRLIB }}
+          MACOSX_DEPLOYMENT_TARGET: "13.0"
         run: cargo run
 
       - name: Sizes

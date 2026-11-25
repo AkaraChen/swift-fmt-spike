@@ -117,6 +117,31 @@ fn main() {
             ] {
                 println!("cargo:rustc-link-lib=dylib={l}");
             }
+            // Swift code built for an older deployment target than the compiler
+            // emits __swift_FORCE_LOAD_$_swiftCompatibilityNN symbols; those are
+            // defined in the toolchain's static compatibility archives
+            // (usr/lib/swift_static/macosx/libswiftCompatibility*.a).
+            if let Ok(u) = &usrlib {
+                let compat_dir = Path::new(u).join("swift_static/macosx");
+                if compat_dir.is_dir() {
+                    println!("cargo:rustc-link-search=native={}", compat_dir.display());
+                    if let Ok(entries) = fs::read_dir(&compat_dir) {
+                        for e in entries.flatten() {
+                            let n = e.file_name().to_string_lossy().to_string();
+                            if n.starts_with("libswiftCompatibility") && n.ends_with(".a") {
+                                if let Some(stem) = n
+                                    .strip_prefix("lib")
+                                    .and_then(|s| s.strip_suffix(".a"))
+                                {
+                                    println!("cargo:rustc-link-lib=static={stem}");
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    println!("cargo:warning=SWIFTFMT: compat archive dir not found: {}", compat_dir.display());
+                }
+            }
             for f in ["Foundation", "CoreFoundation"] {
                 println!("cargo:rustc-link-lib=framework={f}");
             }
