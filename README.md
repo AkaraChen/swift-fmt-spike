@@ -66,3 +66,14 @@ try formatter.format(
 
 _TBD — filled in after the first green CI run; see the run logs for the exact
 per-platform evidence._
+
+## Verdict (2026-11-26)
+
+Shim builds succeed on linux x86_64/aarch64 + 3 macOS configs. The Rust-side
+link against the toolchain tarball's `swift_static/linux` archives fails with
+undefined FoundationEssentials symbols (`Date.nextUp/nextDown`, …) regardless
+of archive ordering/repetition — the tarball's static set is incomplete for
+Foundation. Apple's own fully-static Linux Swift binaries use the separate
+"Swift SDK for static Linux" artifact bundle, which drags in a second
+toolchain, ~20-40 MB binary growth, and per-platform shim products per
+release. Considered and abandoned for fama; kept here as reference.
