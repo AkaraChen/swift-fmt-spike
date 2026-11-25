@@ -2,3 +2,5 @@
 target/
 *.tar.gz
 .DS_Store
+swiftformat.wasm
+swiftformat.wasm.zst

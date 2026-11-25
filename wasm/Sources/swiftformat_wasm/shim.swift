@@ -3,22 +3,32 @@
 //
 // ABI:
 //   swiftformat_alloc(len: i32) -> ptr: i32                 host allocates input scratch
-//   swiftformat_format(srcPtr: i32, srcLen: i32,
-//                      cfgPtr: i32, cfgLen: i32) -> packed: i64
-//       >= 0: success, packed low 32 bits = output length (UTF-8, via out_ptr/out_len)
-//       <  0: error; error message UTF-8 via err_ptr/err_len
-//             -1 = config decode error, -2 = format error, -3 = unknown error
+//   swiftformat_free(ptr, len)                              release an alloc'd buffer
+//   swiftformat_format(srcPtr, srcLen, cfgPtr, cfgLen) -> packed: i64
+//       >= 0: success, output length in bytes (UTF-8, via out_ptr/out_len)
+//       <  0: error; message UTF-8 via err_ptr/err_len
+//             -1 = config decode error, -2 = SwiftFormatError, -3 = other
 //   swiftformat_out_ptr() -> ptr: i32
 //   swiftformat_out_len() -> len: i32
 //   swiftformat_err_ptr() -> ptr: i32
 //   swiftformat_err_len() -> len: i32
-//   swiftformat_wasm_version() -> version: i32   (packed major*10000+minor*100+patch-ish marker)
+//   swiftformat_wasm_version() -> version: i32
 //
-// cfg JSON: SwiftFormat Configuration JSON (https://github.com/swiftlang/swift-format);
-// cfgLen == 0 uses Configuration() defaults. Exercises JSONDecoder either way.
+// cfg JSON: swift-format `Configuration` JSON; cfgLen == 0 uses defaults.
+//
+// Syntax errors: 603.0.0 only reports parse failures through
+// `parsingDiagnosticHandler` (without one, swift-format formats garbage
+// best-effort). We collect diagnostics, record ERROR-severity ones, and let
+// the library throw `fileContainsInvalidSyntax` for those; warnings alone
+// neither throw nor fail the call.
+//
+// No Foundation FileManager/URL FS access on the format path: the formatter
+// is handed `nil` for assumingFileURL, so the module only ever needs the
+// WASI imports its runtime uses at startup.
 //===----------------------------------------------------------------------===//
 
 import Foundation
+import SwiftDiagnostics
 import SwiftFormat
 
 /// Accumulating TextOutputStream.
@@ -29,8 +39,6 @@ struct ByteStream: TextOutputStream {
   }
 }
 
-// Module-owned output/error buffers; pointers stay stable between calls as long
-// as the host does not call format again (single-threaded contract).
 @main
 struct ShimMain {
   static func main() {}  // host drives everything through the exported C ABI
@@ -42,6 +50,11 @@ nonisolated(unsafe) var errBuffer: [UInt8] = []
 @_cdecl("swiftformat_alloc")
 public func swiftformat_alloc(_ len: Int32) -> UnsafeMutableRawPointer? {
   return UnsafeMutableRawPointer.allocate(byteCount: Int(len), alignment: 16)
+}
+
+@_cdecl("swiftformat_free")
+public func swiftformat_free(_ ptr: UnsafeMutableRawPointer?, _ len: Int32) {
+  ptr?.deallocate()
 }
 
 @_cdecl("swiftformat_format")
@@ -65,18 +78,29 @@ public func swiftformat_format(
 
   let source = String(decoding: UnsafeBufferPointer(start: srcPtr.bindMemory(to: UInt8.self, capacity: Int(srcLen)), count: Int(srcLen)), as: UTF8.self)
 
+  var diagnostics: [String] = []
+  var hasErrors = false
   let formatter = SwiftFormatter(configuration: configuration)
   var stream = ByteStream()
-  let url = URL(fileURLWithPath: "input.swift")  // dummy URL; probe: does format() touch FileManager?
   do {
     try formatter.format(
       source: source,
-      assumingFileURL: url,
+      assumingFileURL: nil,
       selection: .infinite,
-      to: &stream
+      to: &stream,
+      parsingDiagnosticHandler: { diag, _ in
+        if diagnostics.count < 8 {
+          diagnostics.append("\(diag.diagMessage.severity): \(diag.message)")
+        }
+        if diag.diagMessage.severity == .error { hasErrors = true }
+      }
     )
   } catch {
-    errBuffer = Array("format error: \(error)".utf8)
+    var message = "format error: \(error)"
+    if !diagnostics.isEmpty {
+      message += " [" + diagnostics.joined(separator: "; ") + "]"
+    }
+    errBuffer = Array(message.utf8)
     if error is SwiftFormatError { return -2 }
     return -3
   }

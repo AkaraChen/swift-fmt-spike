@@ -50,10 +50,20 @@ jobs:
       - name: Build wasm module
         run: bash wasm/build-ci.sh
 
+      - name: Strip custom sections (debug, name, producers)
+        run: python3 wasm/strip.py swiftformat.wasm
+
+      - name: Compress for vendoring
+        run: |
+          zstd -19 -T0 -q -o swiftformat.wasm.zst swiftformat.wasm
+          ls -la swiftformat.wasm swiftformat.wasm.zst
+
       - name: Import table report
-        run: python3 wasm/imports.py swiftformat.wasm
+        run: python3 wasm/imports.py swiftformat.wasm | tee imports-report.txt
 
       - uses: actions/upload-artifact@v4
         with:
           name: swiftformat-wasm
-          path: swiftformat.wasm
+          path: |
+            swiftformat.wasm.zst
+            imports-report.txt
